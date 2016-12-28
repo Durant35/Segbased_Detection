@@ -39,15 +39,18 @@ private:
     PM::DataPoints *mapPointCloud;
     PM::DataPoints *scanPointCloud;
     PM::DataPoints outlierScan;
+    PM::DataPoints scanInRangeCloud;
 
     ros::Publisher mapPointCloudPub;
     ros::Publisher scanPointCloudPub;
     ros::Publisher outlierScanPub;
+    ros::Publisher scanInRangePub;
     ros::NodeHandle& n;
     PM::TransformationParameters TRobotToMap;
     unique_ptr<PM::Transformation> transformation;
 
     const float distanceThreshold;
+    const float rangeThreshold;
 
 protected:
 
@@ -60,7 +63,8 @@ Detection::Detection(ros::NodeHandle& n):
   scanFileName(getParam<string>("scan_vtk", ".")),
   poseFileName(getParam<string>("pose", ".")),
   transformation(PM::get().REG(Transformation).create("RigidTransformation")),
-  distanceThreshold(getParam<double>("distanceThreshold", 1.0))
+  distanceThreshold(getParam<double>("distanceThreshold", 1.0)),
+  rangeThreshold(getParam<double>("rangeThreshold", 20.0))
 {
 
     //load map vtk
@@ -89,6 +93,7 @@ Detection::Detection(ros::NodeHandle& n):
     mapPointCloudPub = n.advertise<sensor_msgs::PointCloud2>("reference_map_points", 2, true);
     scanPointCloudPub = n.advertise<sensor_msgs::PointCloud2>("raw_scan_points", 2, true);
     outlierScanPub = n.advertise<sensor_msgs::PointCloud2>("outlier_scan_points", 2, true);
+    scanInRangePub = n.advertise<sensor_msgs::PointCloud2>("scan_inrange_points", 2, true);
     TRobotToMap.setZero(4,4);
 
     ifstream in;
@@ -104,50 +109,60 @@ Detection::~Detection()
 
 void Detection::process()
 {
-
-
-    *scanPointCloud = transformation->compute(*scanPointCloud, TRobotToMap);
-
-
-
-
-
-
-
-
-    //for Publish new Cloud
     //NEW CLOUD?
     cout<<"scan Num: "<<scanPointCloud->features.cols()<<endl;
     cout<<"Map Num: "<<mapPointCloud->features.cols()<<endl;
 
-    //start knn
+
     const int scanPtsCount(scanPointCloud->features.cols());
-    const int mapPtsCount(mapPointCloud->features.cols());
+
+
+
+    scanInRangeCloud = scanPointCloud->createSimilarEmpty();
+    int scanInRangeCount = 0;
+
+    for(int i =0; i < scanPtsCount; i++)
+    {
+        if(scanPointCloud->features.col(i).head(3).norm() < rangeThreshold)
+        {
+            scanInRangeCloud.setColFrom(scanInRangeCount, *scanPointCloud, i);
+            scanInRangeCount++;
+        }
+    }
+
+    cout<<"scan In Range Num: "<<scanInRangeCount<<endl;
+
+    scanInRangeCloud.conservativeResize(scanInRangeCount);
 
 
 
 
+    *scanPointCloud = transformation->compute(*scanPointCloud, TRobotToMap);
+    scanInRangeCloud = transformation->compute(scanInRangeCloud, TRobotToMap);
 
 
+
+    //NNS
     std::shared_ptr<NNS> featureNNS;
     featureNNS.reset( NNS::create(mapPointCloud->features, mapPointCloud->features.rows() - 1, NNS::KDTREE_LINEAR_HEAP, NNS::TOUCH_STATISTICS));
 
     PM::Matches matches_overlap(
-        Matches::Dists(1, scanPtsCount),
-        Matches::Ids(1, scanPtsCount)
+        Matches::Dists(1, scanInRangeCount),
+        Matches::Ids(1, scanInRangeCount)
     );
 
-    featureNNS->knn(scanPointCloud->features, matches_overlap.ids, matches_overlap.dists, 1, 0);
+    featureNNS->knn(scanInRangeCloud.features, matches_overlap.ids, matches_overlap.dists, 1, 0);
 
 
-    outlierScan = scanPointCloud->createSimilarEmpty();
+    //filter According to E-distance
+    outlierScan = scanInRangeCloud.createSimilarEmpty();
     int outlierCount = 0;
 
-    for(int i = 0; i < scanPtsCount; i++)
+    for(int i = 0; i < scanInRangeCount; i++)
     {
         if(matches_overlap.dists(i) > distanceThreshold)
         {
-            outlierScan.setColFrom(outlierCount, *scanPointCloud, i);
+            outlierScan.setColFrom(outlierCount, scanInRangeCloud, i);
             outlierCount++;
         }
     }
@@ -157,10 +172,17 @@ void Detection::process()
     cout<<"outlier Num: "<<outlierCount<<endl;
 
 
+
+
+
+
+
+
 }
 
 void Detection::publish()
 {
+    scanInRangePub.publish(PointMatcher_ros::pointMatcherCloudToRosMsg<float>(scanInRangeCloud, "map", ros::Time::now()));
     outlierScanPub.publish(PointMatcher_ros::pointMatcherCloudToRosMsg<float>(outlierScan, "map", ros::Time::now()));
     mapPointCloudPub.publish(PointMatcher_ros::pointMatcherCloudToRosMsg<float>(*mapPointCloud, "map", ros::Time::now()));
     scanPointCloudPub.publish(PointMatcher_ros::pointMatcherCloudToRosMsg<float>(*scanPointCloud, "map", ros::Time::now()));
