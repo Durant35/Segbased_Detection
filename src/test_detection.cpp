@@ -19,6 +19,7 @@ class Detection
 {
     typedef PointMatcher<float> PM;
     typedef PM::DataPoints DP;
+    typedef PM::Matches Matches;
 
     typedef typename Nabo::NearestNeighbourSearch<float> NNS;
     typedef typename NNS::SearchType NNSearchType;
@@ -37,12 +38,16 @@ private:
     string poseFileName;
     PM::DataPoints *mapPointCloud;
     PM::DataPoints *scanPointCloud;
+    PM::DataPoints outlierScan;
 
     ros::Publisher mapPointCloudPub;
     ros::Publisher scanPointCloudPub;
+    ros::Publisher outlierScanPub;
     ros::NodeHandle& n;
     PM::TransformationParameters TRobotToMap;
     unique_ptr<PM::Transformation> transformation;
+
+    const float distanceThreshold;
 
 protected:
 
@@ -54,7 +59,8 @@ Detection::Detection(ros::NodeHandle& n):
   mapFileName(getParam<string>("map_vtk", ".")),
   scanFileName(getParam<string>("scan_vtk", ".")),
   poseFileName(getParam<string>("pose", ".")),
-  transformation(PM::get().REG(Transformation).create("RigidTransformation"))
+  transformation(PM::get().REG(Transformation).create("RigidTransformation")),
+  distanceThreshold(getParam<double>("distanceThreshold", 1.0))
 {
 
     //load map vtk
@@ -82,6 +88,7 @@ Detection::Detection(ros::NodeHandle& n):
     //Pubs
     mapPointCloudPub = n.advertise<sensor_msgs::PointCloud2>("reference_map_points", 2, true);
     scanPointCloudPub = n.advertise<sensor_msgs::PointCloud2>("raw_scan_points", 2, true);
+    outlierScanPub = n.advertise<sensor_msgs::PointCloud2>("outlier_scan_points", 2, true);
     TRobotToMap.setZero(4,4);
 
     ifstream in;
@@ -98,7 +105,11 @@ Detection::~Detection()
 void Detection::process()
 {
 
+
     *scanPointCloud = transformation->compute(*scanPointCloud, TRobotToMap);
+
+
+
 
 
 
@@ -106,71 +117,51 @@ void Detection::process()
 
     //for Publish new Cloud
     //NEW CLOUD?
+    cout<<"scan Num: "<<scanPointCloud->features.cols()<<endl;
+    cout<<"Map Num: "<<mapPointCloud->features.cols()<<endl;
 
     //start knn
-    const int readPtsCount(scanPointCloud->features.cols());
+    const int scanPtsCount(scanPointCloud->features.cols());
     const int mapPtsCount(mapPointCloud->features.cols());
 
-    // Build a range image of the reading point cloud (local coordinates)
-    PM::Matrix radius_reading = scanPointCloud->features.topRows(3).colwise().norm();
-    PM::Matrix angles_reading(2, readPtsCount); // 0=inclination, 1=azimuth
 
-    // No atan in Eigen, so we are for to loop through it...
-    for(int i=0; i<readPtsCount; i++)
+
+
+
+
+    std::shared_ptr<NNS> featureNNS;
+    featureNNS.reset( NNS::create(mapPointCloud->features, mapPointCloud->features.rows() - 1, NNS::KDTREE_LINEAR_HEAP, NNS::TOUCH_STATISTICS));
+
+    PM::Matches matches_overlap(
+        Matches::Dists(1, scanPtsCount),
+        Matches::Ids(1, scanPtsCount)
+    );
+
+    featureNNS->knn(scanPointCloud->features, matches_overlap.ids, matches_overlap.dists, 1, 0);
+
+
+    outlierScan = scanPointCloud->createSimilarEmpty();
+    int outlierCount = 0;
+
+    for(int i = 0; i < scanPtsCount; i++)
     {
-        const float ratio = scanPointCloud->features(2,i)/radius_reading(0,i);
-        //if(ratio < -1 || ratio > 1)
-            //cout << "Error angle!" << endl;
-
-        angles_reading(0,i) = acos(ratio);
-        angles_reading(1,i) = atan2(scanPointCloud->features(1,i), scanPointCloud->features(0,i));
-    }
-
-    //Initial NNS
-    shared_ptr<NNS> featureNNS;
-    featureNNS.reset( NNS::create(angles_reading));
-
-    // Remove points out of sensor range
-    // FIXME: this is a parameter
-    const float sensorMaxRange = 80.0;
-    PM::Matrix globalId(1, mapPtsCount);
-
-    int mapCutPtsCount = 0;
-    DP mapLocalFrameCut(mapPointCloud->createSimilarEmpty());
-    for (int i = 0; i < mapPtsCount; i++)
-    {
-        if (mapPointCloud->features.col(i).head(3).norm() < sensorMaxRange)
+        if(matches_overlap.dists(i) > distanceThreshold)
         {
-            mapLocalFrameCut.setColFrom(mapCutPtsCount, *mapPointCloud, i);
-            globalId(0,mapCutPtsCount) = i;
-            mapCutPtsCount++;
+            outlierScan.setColFrom(outlierCount, *scanPointCloud, i);
+            outlierCount++;
         }
     }
 
-    mapLocalFrameCut.conservativeResize(mapCutPtsCount);
+    outlierScan.conservativeResize(outlierCount);
 
-    //SAME AS READING CLOUD
-    PM::Matrix radius_map = mapPointCloud->features.topRows(3).colwise().norm();
+    cout<<"outlier Num: "<<outlierCount<<endl;
 
-    PM::Matrix angles_map(2, mapCutPtsCount); // 0=inclination, 1=azimuth
-
-    // No atan in Eigen, so we are for to loop through it...
-    for(int i=0; i<mapCutPtsCount; i++)
-    {
-        const float ratio = mapLocalFrameCut.features(2,i)/radius_map(0,i);
-        //if(ratio < -1 || ratio > 1)
-            //cout << "Error angle!" << endl;
-
-        angles_map(0,i) = acos(ratio);
-
-        angles_map(1,i) = atan2(mapLocalFrameCut.features(1,i), mapLocalFrameCut.features(0,i));
-    }
 
 }
 
 void Detection::publish()
 {
-
+    outlierScanPub.publish(PointMatcher_ros::pointMatcherCloudToRosMsg<float>(outlierScan, "map", ros::Time::now()));
     mapPointCloudPub.publish(PointMatcher_ros::pointMatcherCloudToRosMsg<float>(*mapPointCloud, "map", ros::Time::now()));
     scanPointCloudPub.publish(PointMatcher_ros::pointMatcherCloudToRosMsg<float>(*scanPointCloud, "map", ros::Time::now()));
 }
