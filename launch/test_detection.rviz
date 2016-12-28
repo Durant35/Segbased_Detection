@@ -6,6 +6,7 @@ Panels:
       Expanded:
         - /Global Options1
         - /Status1
+        - /Grid1
         - /PointCloud21
         - /PointCloud22
         - /PointCloud23
@@ -49,7 +50,7 @@ Visualization Manager:
         Y: 0
         Z: 0
       Plane: XY
-      Plane Cell Count: 10
+      Plane Cell Count: 99
       Reference Frame: <Fixed Frame>
       Value: true
     - Alpha: 1
@@ -126,21 +127,21 @@ Visualization Manager:
       Decay Time: 0
       Enabled: true
       Invert Rainbow: false
-      Max Color: 255; 255; 255
-      Max Intensity: 135
-      Min Color: 0; 0; 0
+      Max Color: 255; 0; 0
+      Max Intensity: 56
+      Min Color: 255; 0; 0
       Min Intensity: 0
       Name: PointCloud2
       Position Transformer: XYZ
       Queue Size: 10
       Selectable: true
       Size (Pixels): 3
-      Size (m): 0.05
+      Size (m): 0.03
       Style: Flat Squares
       Topic: /outlier_scan_points
       Unreliable: false
       Use Fixed Frame: true
-      Use rainbow: true
+      Use rainbow: false
       Value: true
     - Alpha: 1
       Autocompute Intensity Bounds: true
@@ -196,22 +197,22 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz/Orbit
-      Distance: 21.3545
+      Distance: 24.7001
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.06
         Stereo Focal Distance: 1
         Swap Stereo Eyes: false
         Value: false
       Focal Point:
-        X: 19.3669
-        Y: -5.94016
-        Z: -6.7077
+        X: 20.2769
+        Y: -3.43109
+        Z: -7.15821
       Name: Current View
       Near Clip Distance: 0.01
-      Pitch: 1.2648
+      Pitch: 1.4998
       Target Frame: <Fixed Frame>
       Value: Orbit (rviz)
-      Yaw: 3.05545
+      Yaw: 2.52545
     Saved: ~
 Window Geometry:
   Displays:
@@ -229,5 +230,5 @@ Window Geometry:
   Views:
     collapsed: false
   Width: 1879
-  X: 31
-  Y: 14
+  X: 245
+  Y: 177

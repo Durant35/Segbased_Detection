@@ -11,6 +11,8 @@
 #include <tf/transform_broadcaster.h>
 
 #include <fstream>
+#include <vector>
+#include <algorithm>
 
 using namespace std;
 using namespace PointMatcherSupport;
@@ -27,9 +29,9 @@ class Detection
 public:
     Detection(ros::NodeHandle &n);
     ~Detection();
-    void process();
+    void extract();
     void publish();
-
+    void cluster();
 
 private:
 
@@ -51,6 +53,7 @@ private:
 
     const float distanceThreshold;
     const float rangeThreshold;
+    const float growingThreshold;
 
 protected:
 
@@ -64,7 +67,8 @@ Detection::Detection(ros::NodeHandle& n):
   poseFileName(getParam<string>("pose", ".")),
   transformation(PM::get().REG(Transformation).create("RigidTransformation")),
   distanceThreshold(getParam<double>("distanceThreshold", 1.0)),
-  rangeThreshold(getParam<double>("rangeThreshold", 20.0))
+  rangeThreshold(getParam<double>("rangeThreshold", 20.0)),
+  growingThreshold(getParam<double>("growingThreshold", 0.5))
 {
 
     //load map vtk
@@ -107,16 +111,13 @@ Detection::Detection(ros::NodeHandle& n):
 Detection::~Detection()
 {}
 
-void Detection::process()
+void Detection::extract()
 {
-    //NEW CLOUD?
+
     cout<<"scan Num: "<<scanPointCloud->features.cols()<<endl;
     cout<<"Map Num: "<<mapPointCloud->features.cols()<<endl;
 
-
     const int scanPtsCount(scanPointCloud->features.cols());
-
-
 
     scanInRangeCloud = scanPointCloud->createSimilarEmpty();
     int scanInRangeCount = 0;
@@ -134,16 +135,11 @@ void Detection::process()
 
     scanInRangeCloud.conservativeResize(scanInRangeCount);
 
-
-
-
     *scanPointCloud = transformation->compute(*scanPointCloud, TRobotToMap);
     scanInRangeCloud = transformation->compute(scanInRangeCloud, TRobotToMap);
 
-
-
     //NNS
-    std::shared_ptr<NNS> featureNNS;
+    shared_ptr<NNS> featureNNS;
     featureNNS.reset( NNS::create(mapPointCloud->features, mapPointCloud->features.rows() - 1, NNS::KDTREE_LINEAR_HEAP, NNS::TOUCH_STATISTICS));
 
     PM::Matches matches_overlap(
@@ -171,12 +167,71 @@ void Detection::process()
 
     cout<<"outlier Num: "<<outlierCount<<endl;
 
+}
+
+void Detection::cluster()
+{
+
+    const int outlierCount(outlierScan.features.cols());
 
 
+    //initial donePoints
+    DP outlierScanTemp = outlierScan;
+    DP outlierScanTempTemp, thePointCloud;
+    int thePointIndex = 0;
+    shared_ptr<NNS> forceNNS;
+    int cluster = 0;
+
+    for(int i = 1; i < outlierCount - 1; i++)
+    {
+
+        //create the new DP-kd-tree form the remaining, delete the thePoint by Index, move it to thePointCloud
+        int remainPointCount(outlierScanTemp.features.cols());
+        int count = 0;
+        outlierScanTempTemp = outlierScanTemp.createSimilarEmpty();
+        thePointCloud = outlierScanTemp.createSimilarEmpty();
+
+        for(int j = 0; j < remainPointCount; j++)
+        {
+            if(j != thePointIndex)
+            {
+                outlierScanTempTemp.setColFrom(count, outlierScanTemp, j);
+                count++;
+            }
+            else
+            {
+                thePointCloud.setColFrom(0, outlierScanTemp, j);
+            }
+        }
+        outlierScanTempTemp.conservativeResize(count);
+        cout<<"count:  "<<count<<endl;
+        thePointCloud.conservativeResize(1);
+
+        outlierScanTemp = outlierScanTempTemp;
 
 
+        //NNS
+        forceNNS.reset( NNS::create(outlierScanTemp.features, outlierScanTemp.features.rows() - 1, NNS::KDTREE_LINEAR_HEAP, NNS::TOUCH_STATISTICS));
+        PM::Matches matches_overlap(
+            Matches::Dists(1, 1),
+            Matches::Ids(1, 1)
+        );
+
+        forceNNS->knn(thePointCloud.features, matches_overlap.ids, matches_overlap.dists, 1, 0);
+
+        cout<<i<<" dis: "<<matches_overlap.dists(0)<<endl;//<<" itn:  "<<matches_overlap.ids(0)//<<"  "<<matches_overlap.ids(0,0)
+
+        thePointIndex = matches_overlap.ids(0);
+
+        if(matches_overlap.dists(0) > growingThreshold)
+        {
+            cluster++;
+        }
 
 
+    }
+
+    cout<<"clustered:  "<<cluster<<endl;
 
 }
 
@@ -194,7 +249,8 @@ int main(int argc, char **argv)
     ros::NodeHandle n;
     Detection detection(n);
 
-    detection.process();
+    detection.extract();
+    detection.cluster();
 
     ros::Rate r(10);
     while(ros::ok())
