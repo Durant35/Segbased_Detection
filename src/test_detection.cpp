@@ -66,6 +66,7 @@ private:
 
     int clusterCount = 0;  //label of cluster
     vector<int> clusterPointsNum;
+    bool isCout;
 
 protected:
 
@@ -81,7 +82,8 @@ Detection::Detection(ros::NodeHandle& n):
   distanceThreshold(getParam<double>("distanceThreshold", 1.0)),
   rangeThreshold(getParam<double>("rangeThreshold", 20.0)),
   growingThreshold(getParam<double>("growingThreshold", 0.5)),
-  filterPointsRatio(getParam<double>("filterPointsRatio", 0.2))
+  filterPointsRatio(getParam<double>("filterPointsRatio", 0.2)),
+  isCout(getParam<bool>("isCout", false))
 {
 
     //load map vtk
@@ -129,9 +131,6 @@ Detection::~Detection()
 void Detection::extract()
 {
 
-    cout<<"scan Num: "<<scanPointCloud->features.cols()<<endl;
-    cout<<"Map Num: "<<mapPointCloud->features.cols()<<endl;
-
     const int scanPtsCount(scanPointCloud->features.cols());
 
     scanInRangeCloud = scanPointCloud->createSimilarEmpty();
@@ -146,7 +145,8 @@ void Detection::extract()
         }
     }
 
-    cout<<"scan In Range Num: "<<scanInRangeCount<<endl;
+    if(isCout)
+        cout<<"scan In Range Num: "<<scanInRangeCount<<endl;
 
     scanInRangeCloud.conservativeResize(scanInRangeCount);
 
@@ -188,7 +188,12 @@ void Detection::cluster()
     const int rowLine = outlierScan.getDescriptorStartingRow("cluster");
 
     const int outlierCount(outlierScan.features.cols());
-    cout<<"outlier Num: "<<outlierCount<<endl;
+    if(isCout)
+    {
+        cout<<"scan Num: "<<scanPointCloud->features.cols()<<endl;
+        cout<<"Map Num: "<<mapPointCloud->features.cols()<<endl;
+        cout<<"outlier Num: "<<outlierCount<<endl;
+    }
 
 
     //initial donePoints
@@ -200,7 +205,9 @@ void Detection::cluster()
 
     for(int i = 1; i < outlierCount + 1; i++)
     {
-        cout<<"iter:  "<<i;
+        if(isCout)
+            cout<<"iter:  "<<i;
+
         //create the new DP-kd-tree form the remaining, delete the thePoint by Index, move it to thePointCloud
         int remainPointCount(outlierScanTemp.features.cols());
         int count = 0;
@@ -231,7 +238,8 @@ void Detection::cluster()
 
         outlierScanTemp = outlierScanTempTemp;
 
-        cout<<"  remain Points-kd:  "<<outlierScanTemp.features.cols();
+        if(isCout)
+            cout<<"  remain Points-kd:  "<<outlierScanTemp.features.cols();
 
         //last point could not use NNS in kd-tree
         if(i == outlierCount - 1)
@@ -245,12 +253,10 @@ void Detection::cluster()
                clusterCount++;
                clusterPointsNum.push_back(clusterPointsCount);
                clusterPointsCount = 1;
-               cout<<"  num in Cluster:  "<<clusterPointsCount<<endl;
            }
            else
            {
                clusterPointsCount ++;
-               cout<<"  num in Cluster:  "<<clusterPointsCount<<endl;
            }
 
            thePointIndex = 0;
@@ -259,8 +265,10 @@ void Detection::cluster()
         }
 
         if(i == outlierCount)
+        {
+            clusterPointsNum.push_back(clusterPointsCount);
             break;
-
+        }
         //NNS
         forceNNS.reset( NNS::create(outlierScanTemp.features, outlierScanTemp.features.rows() - 1, NNS::KDTREE_LINEAR_HEAP, NNS::TOUCH_STATISTICS));
         PM::Matches matches_overlap(
@@ -277,20 +285,19 @@ void Detection::cluster()
             clusterCount++;
             clusterPointsNum.push_back(clusterPointsCount);
             clusterPointsCount = 1;
-            cout<<"  num in Cluster:  "<<clusterPointsCount<<endl;
         }
         else
         {
             clusterPointsCount ++;
-            cout<<"  num in Cluster:  "<<clusterPointsCount<<endl;
         }
 
+        if(isCout)
+            cout<<"  num in Cluster:  "<<clusterPointsCount<<endl;
     }
 
 
-    clusterPointsNum.push_back(clusterPointsCount);
-
-    cout<<"   CLUSTERED:  "<<clusterCount<<endl;
+    if(isCout)
+        cout<<"   CLUSTERED:  "<<clusterCount<<endl;
 
 }
 
@@ -301,7 +308,6 @@ float Detection::calculateDist(Eigen::Vector3f inputA, Eigen::Vector3f inputB)
 
 void Detection::postFilter()
 {
-    cout<<"--------------!!!!!!!!!!!!!!!!!!!!----------------"<<endl;
     const int outlierCount(outlierScan.features.cols());
     const int rowLine = outlierScan.getDescriptorStartingRow("cluster");
 
@@ -309,12 +315,16 @@ void Detection::postFilter()
 
     for(int i = 0; i <= clusterCount; i++)
     {
-        cout<<"---------------------------------------"<<endl;
-        cout<<"clusterNum: "<<clusterPointsNum.at(i)<<endl;
-        cout<<"Ratio:  "<<(double)clusterPointsNum.at(i) / (double)outlierCount<<endl;
+        if(isCout)
+        {
+            cout<<"---------------------------------------"<<endl;
+            cout<<"clusterNum: "<<clusterPointsNum.at(i)<<endl;
+            cout<<"Ratio:  "<<(double)clusterPointsNum.at(i) / (double)outlierCount<<endl;
+        }
         if((double)clusterPointsNum.at(i) / (double)outlierCount < filterPointsRatio)
         {
-            cout<<"weed OUT:  "<<i<<endl;
+            if(isCout)
+                cout<<"weed OUT:  "<<i<<endl;
             weedOut.push_back(i);
         }
     }
@@ -338,7 +348,8 @@ void Detection::postFilter()
 
     finalScan.conservativeResize(count);
 
-    cout<<"After filter:  "<<finalScan.features.cols()<<endl;
+    if(isCout)
+        cout<<"After filter:  "<<finalScan.features.cols()<<endl;
 
 }
 
