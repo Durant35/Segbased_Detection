@@ -38,6 +38,7 @@ private:
     string mapFileName;
     string scanFileName;
     string poseFileName;
+
     PM::DataPoints *mapPointCloud;
     PM::DataPoints *scanPointCloud;
     PM::DataPoints outlierScan;
@@ -47,6 +48,8 @@ private:
     ros::Publisher scanPointCloudPub;
     ros::Publisher outlierScanPub;
     ros::Publisher scanInRangePub;
+    ros::Publisher scanClusterPub;
+
     ros::NodeHandle& n;
     PM::TransformationParameters TRobotToMap;
     unique_ptr<PM::Transformation> transformation;
@@ -54,6 +57,8 @@ private:
     const float distanceThreshold;
     const float rangeThreshold;
     const float growingThreshold;
+
+    vector<PM::DataPoints> clusterResult;
 
 protected:
 
@@ -180,7 +185,11 @@ void Detection::cluster()
     DP outlierScanTempTemp, thePointCloud;
     int thePointIndex = 0;
     shared_ptr<NNS> forceNNS;
-    int cluster = 0;
+
+    int clusterCount = 0;
+    int inClusterCount = 0;
+    DP scanCluster;
+    scanCluster = outlierScanTemp.createSimilarEmpty();
 
     for(int i = 1; i < outlierCount - 1; i++)
     {
@@ -201,10 +210,10 @@ void Detection::cluster()
             else
             {
                 thePointCloud.setColFrom(0, outlierScanTemp, j);
+                scanCluster.setColFrom(inClusterCount, outlierScanTemp, j);
             }
         }
         outlierScanTempTemp.conservativeResize(count);
-        cout<<"count:  "<<count<<endl;
         thePointCloud.conservativeResize(1);
 
         outlierScanTemp = outlierScanTempTemp;
@@ -219,19 +228,30 @@ void Detection::cluster()
 
         forceNNS->knn(thePointCloud.features, matches_overlap.ids, matches_overlap.dists, 1, 0);
 
-        cout<<i<<" dis: "<<matches_overlap.dists(0)<<endl;//<<" itn:  "<<matches_overlap.ids(0)//<<"  "<<matches_overlap.ids(0,0)
+        cout<<"iter:  "<<i<<" dis: "<<matches_overlap.dists(0)<<endl;//<<" itn:  "<<matches_overlap.ids(0)//<<"  "<<matches_overlap.ids(0,0)
 
         thePointIndex = matches_overlap.ids(0);
 
         if(matches_overlap.dists(0) > growingThreshold)
         {
-            cluster++;
+            clusterCount++;
+            scanCluster.conservativeResize(inClusterCount);
+            clusterResult.push_back(scanCluster);
+
+            scanCluster = outlierScanTemp.createSimilarEmpty();
+            inClusterCount = 0;
+
+        }
+        else
+        {
+            inClusterCount++;
         }
 
 
     }
 
-    cout<<"clustered:  "<<cluster<<endl;
+    cout<<"clustered:  "<<clusterCount<<endl;
+    cout<<"vector size:  "<<clusterResult.size()<<endl;
 
 }
 
@@ -252,12 +272,12 @@ int main(int argc, char **argv)
     detection.extract();
     detection.cluster();
 
-    ros::Rate r(10);
-    while(ros::ok())
-    {
+//    ros::Rate r(10);
+//    while(ros::ok())
+//    {
         detection.publish();
-        r.sleep();
-    }
+//        r.sleep();
+//    }
 
     ros::spin();
 

@@ -5,9 +5,9 @@
     <param name="map_vtk" value="$(find test_detection)/data/map/2.vtk"/>
     <param name="scan_vtk" value="$(find test_detection)/data/scan/7.vtk"/>
     <param name="pose" value="$(find test_detection)/data/pose/7.txt"/>
-    <param name="distanceThreshold" value="2.7"/>
+    <param name="distanceThreshold" value="2.5"/>
     <param name="rangeThreshold" value="15.0"/>
-    <param name="growingThreshold" value="3.0"/>
+    <param name="growingThreshold" value="0.5"/>
 
   </node>
 
