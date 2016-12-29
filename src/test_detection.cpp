@@ -7,6 +7,7 @@
 #include "pointmatcher_ros/get_params_from_server.h"
 #include "pointmatcher_ros/transform.h"
 #include "nabo/nabo.h"
+#include "eigen_conversions/eigen_msg.h"
 
 #include <tf/transform_broadcaster.h>
 
@@ -32,6 +33,8 @@ public:
     void extract();
     void publish();
     void cluster();
+    void postFilter();
+    int findThePoint(Eigen::Vector3f input);
 
 private:
 
@@ -43,12 +46,13 @@ private:
     PM::DataPoints *scanPointCloud;
     PM::DataPoints outlierScan;
     PM::DataPoints scanInRangeCloud;
+    PM::DataPoints finalScan;
 
     ros::Publisher mapPointCloudPub;
     ros::Publisher scanPointCloudPub;
     ros::Publisher outlierScanPub;
     ros::Publisher scanInRangePub;
-    ros::Publisher scanClusterPub;
+    ros::Publisher finalScanPub;
 
     ros::NodeHandle& n;
     PM::TransformationParameters TRobotToMap;
@@ -57,8 +61,10 @@ private:
     const float distanceThreshold;
     const float rangeThreshold;
     const float growingThreshold;
+    const float filterPointsRatio;
 
-    vector<PM::DataPoints> clusterResult;
+    int clusterCount = 0;  //label of cluster
+    vector<int> clusterPointsNum;
 
 protected:
 
@@ -73,7 +79,8 @@ Detection::Detection(ros::NodeHandle& n):
   transformation(PM::get().REG(Transformation).create("RigidTransformation")),
   distanceThreshold(getParam<double>("distanceThreshold", 1.0)),
   rangeThreshold(getParam<double>("rangeThreshold", 20.0)),
-  growingThreshold(getParam<double>("growingThreshold", 0.5))
+  growingThreshold(getParam<double>("growingThreshold", 0.5)),
+  filterPointsRatio(getParam<double>("filterPointsRatio", 0.2))
 {
 
     //load map vtk
@@ -103,6 +110,8 @@ Detection::Detection(ros::NodeHandle& n):
     scanPointCloudPub = n.advertise<sensor_msgs::PointCloud2>("raw_scan_points", 2, true);
     outlierScanPub = n.advertise<sensor_msgs::PointCloud2>("outlier_scan_points", 2, true);
     scanInRangePub = n.advertise<sensor_msgs::PointCloud2>("scan_inrange_points", 2, true);
+    finalScanPub = n.advertise<sensor_msgs::PointCloud2>("final_scan_points", 2, true);
+
     TRobotToMap.setZero(4,4);
 
     ifstream in;
@@ -176,20 +185,17 @@ void Detection::extract()
 
 void Detection::cluster()
 {
+    outlierScan.addDescriptor("cluster", PM::Matrix::Zero(1, outlierScan.features.cols()));
+    const int rowLine = outlierScan.getDescriptorStartingRow("cluster");
 
     const int outlierCount(outlierScan.features.cols());
-
 
     //initial donePoints
     DP outlierScanTemp = outlierScan;
     DP outlierScanTempTemp, thePointCloud;
     int thePointIndex = 0;
     shared_ptr<NNS> forceNNS;
-
-    int clusterCount = 0;
-    int inClusterCount = 0;
-    DP scanCluster;
-    scanCluster = outlierScanTemp.createSimilarEmpty();
+    int clusterPointsCount = 0;
 
     for(int i = 1; i < outlierCount - 1; i++)
     {
@@ -210,7 +216,13 @@ void Detection::cluster()
             else
             {
                 thePointCloud.setColFrom(0, outlierScanTemp, j);
-                scanCluster.setColFrom(inClusterCount, outlierScanTemp, j);
+
+                int indexInOutlierScan = findThePoint(outlierScanTemp.features.col(j).head(3));
+                if(indexInOutlierScan != -1)
+                {
+                    outlierScan.descriptors(rowLine, indexInOutlierScan) = clusterCount;
+                }
+
             }
         }
         outlierScanTempTemp.conservativeResize(count);
@@ -235,24 +247,78 @@ void Detection::cluster()
         if(matches_overlap.dists(0) > growingThreshold)
         {
             clusterCount++;
-            scanCluster.conservativeResize(inClusterCount);
-            clusterResult.push_back(scanCluster);
-
-            scanCluster = outlierScanTemp.createSimilarEmpty();
-            inClusterCount = 0;
-
+            clusterPointsNum.push_back(clusterPointsCount);
+            clusterPointsCount = 0;
         }
         else
         {
-            inClusterCount++;
+            clusterPointsCount ++;
         }
-
 
     }
 
-    cout<<"clustered:  "<<clusterCount<<endl;
-    cout<<"vector size:  "<<clusterResult.size()<<endl;
+    clusterPointsNum.push_back(clusterPointsCount-1);
 
+    cout<<"clustered:  "<<clusterCount<<endl;
+
+}
+
+void Detection::postFilter()
+{
+    cout<<"--------------!!!!!!!!!!!!!!!!!!!!----------------"<<endl;
+    const int outlierCount(outlierScan.features.cols());
+    const int rowLine = outlierScan.getDescriptorStartingRow("cluster");
+
+    vector<int> weedOut;
+
+    for(int i = 0; i <= clusterCount; i++)
+    {
+        cout<<"---------------------------------------"<<endl;
+        cout<<"clusterNum: "<<clusterPointsNum.at(i)<<endl;
+        cout<<"Ratio:  "<<(double)clusterPointsNum.at(i) / (double)outlierCount<<endl;
+        if((double)clusterPointsNum.at(i) / (double)outlierCount < filterPointsRatio)
+        {
+            cout<<"weed OUT:  "<<i<<endl;
+            weedOut.push_back(i);
+        }
+    }
+
+    finalScan = outlierScan.createSimilarEmpty();;
+    int count = 0;
+
+    for(int i = 0; i < outlierCount; i++)
+    {
+        vector<int>::iterator it= find(weedOut.begin(), weedOut.end(), outlierScan.descriptors(rowLine, i));
+        if(it != weedOut.end())
+        {
+            continue;
+        }
+        else
+        {
+            finalScan.setColFrom(count, outlierScan, i);
+            count++;
+        }
+    }
+
+    finalScan.conservativeResize(count);
+
+    cout<<"After filter:  "<<count<<endl;
+
+}
+
+int Detection::findThePoint(Eigen::Vector3f input)
+{
+    const int outlierCount(outlierScan.features.cols());
+
+    for(int i = 0; i < outlierCount; i++)
+    {
+        if(outlierScan.features.col(i).head(3) == input)
+        {
+            return i;
+        }
+    }
+
+    return -1;
 }
 
 void Detection::publish()
@@ -261,6 +327,7 @@ void Detection::publish()
     outlierScanPub.publish(PointMatcher_ros::pointMatcherCloudToRosMsg<float>(outlierScan, "map", ros::Time::now()));
     mapPointCloudPub.publish(PointMatcher_ros::pointMatcherCloudToRosMsg<float>(*mapPointCloud, "map", ros::Time::now()));
     scanPointCloudPub.publish(PointMatcher_ros::pointMatcherCloudToRosMsg<float>(*scanPointCloud, "map", ros::Time::now()));
+    finalScanPub.publish(PointMatcher_ros::pointMatcherCloudToRosMsg<float>(finalScan, "map", ros::Time::now()));
 }
 
 int main(int argc, char **argv)
@@ -271,6 +338,7 @@ int main(int argc, char **argv)
 
     detection.extract();
     detection.cluster();
+    detection.postFilter();
 
 //    ros::Rate r(10);
 //    while(ros::ok())
