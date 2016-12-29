@@ -35,6 +35,7 @@ public:
     void cluster();
     void postFilter();
     int findThePoint(Eigen::Vector3f input);
+    float calculateDist(Eigen::Vector3f inputA, Eigen::Vector3f inputB);
 
 private:
 
@@ -179,8 +180,6 @@ void Detection::extract()
 
     outlierScan.conservativeResize(outlierCount);
 
-    cout<<"outlier Num: "<<outlierCount<<endl;
-
 }
 
 void Detection::cluster()
@@ -189,17 +188,19 @@ void Detection::cluster()
     const int rowLine = outlierScan.getDescriptorStartingRow("cluster");
 
     const int outlierCount(outlierScan.features.cols());
+    cout<<"outlier Num: "<<outlierCount<<endl;
+
 
     //initial donePoints
     DP outlierScanTemp = outlierScan;
     DP outlierScanTempTemp, thePointCloud;
     int thePointIndex = 0;
     shared_ptr<NNS> forceNNS;
-    int clusterPointsCount = 0;
+    int clusterPointsCount = 1; //the num of points in one cluster
 
-    for(int i = 1; i < outlierCount - 1; i++)
+    for(int i = 1; i < outlierCount + 1; i++)
     {
-
+        cout<<"iter:  "<<i;
         //create the new DP-kd-tree form the remaining, delete the thePoint by Index, move it to thePointCloud
         int remainPointCount(outlierScanTemp.features.cols());
         int count = 0;
@@ -230,6 +231,35 @@ void Detection::cluster()
 
         outlierScanTemp = outlierScanTempTemp;
 
+        cout<<"  remain Points-kd:  "<<outlierScanTemp.features.cols();
+
+        //last point could not use NNS in kd-tree
+        if(i == outlierCount - 1)
+        {
+           Eigen::Vector3f inputA = thePointCloud.features.col(0).head(3);
+           Eigen::Vector3f inputB = outlierScanTemp.features.col(0).head(3);
+
+           if(this->calculateDist(inputA, inputB) > growingThreshold)
+           {
+
+               clusterCount++;
+               clusterPointsNum.push_back(clusterPointsCount);
+               clusterPointsCount = 1;
+               cout<<"  num in Cluster:  "<<clusterPointsCount<<endl;
+           }
+           else
+           {
+               clusterPointsCount ++;
+               cout<<"  num in Cluster:  "<<clusterPointsCount<<endl;
+           }
+
+           thePointIndex = 0;
+
+           continue;
+        }
+
+        if(i == outlierCount)
+            break;
 
         //NNS
         forceNNS.reset( NNS::create(outlierScanTemp.features, outlierScanTemp.features.rows() - 1, NNS::KDTREE_LINEAR_HEAP, NNS::TOUCH_STATISTICS));
@@ -240,27 +270,33 @@ void Detection::cluster()
 
         forceNNS->knn(thePointCloud.features, matches_overlap.ids, matches_overlap.dists, 1, 0);
 
-        cout<<"iter:  "<<i<<" dis: "<<matches_overlap.dists(0)<<endl;//<<" itn:  "<<matches_overlap.ids(0)//<<"  "<<matches_overlap.ids(0,0)
-
         thePointIndex = matches_overlap.ids(0);
 
         if(matches_overlap.dists(0) > growingThreshold)
         {
             clusterCount++;
             clusterPointsNum.push_back(clusterPointsCount);
-            clusterPointsCount = 0;
+            clusterPointsCount = 1;
+            cout<<"  num in Cluster:  "<<clusterPointsCount<<endl;
         }
         else
         {
             clusterPointsCount ++;
+            cout<<"  num in Cluster:  "<<clusterPointsCount<<endl;
         }
 
     }
 
-    clusterPointsNum.push_back(clusterPointsCount-1);
 
-    cout<<"clustered:  "<<clusterCount<<endl;
+    clusterPointsNum.push_back(clusterPointsCount);
 
+    cout<<"   CLUSTERED:  "<<clusterCount<<endl;
+
+}
+
+float Detection::calculateDist(Eigen::Vector3f inputA, Eigen::Vector3f inputB)
+{
+    return pow(inputA(0)-inputB(0),2) + pow(inputA(1)-inputB(1),2) + pow(inputA(2)-inputB(2),2);
 }
 
 void Detection::postFilter()
@@ -302,7 +338,7 @@ void Detection::postFilter()
 
     finalScan.conservativeResize(count);
 
-    cout<<"After filter:  "<<count<<endl;
+    cout<<"After filter:  "<<finalScan.features.cols()<<endl;
 
 }
 
