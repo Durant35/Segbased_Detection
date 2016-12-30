@@ -62,7 +62,7 @@ private:
     const float distanceThreshold;
     const float rangeThreshold;
     const float growingThreshold;
-    const float filterPointsRatio;
+    const int filterPointsInt;
 
     int clusterCount = 0;  //label of cluster
     vector<int> clusterPointsNum;
@@ -82,8 +82,8 @@ Detection::Detection(ros::NodeHandle& n):
   distanceThreshold(getParam<double>("distanceThreshold", 1.0)),
   rangeThreshold(getParam<double>("rangeThreshold", 20.0)),
   growingThreshold(getParam<double>("growingThreshold", 0.5)),
-  filterPointsRatio(getParam<double>("filterPointsRatio", 0.2)),
-  isCout(getParam<bool>("isCout", false))
+  isCout(getParam<bool>("isCout", false)),
+  filterPointsInt(getParam<int>("filterPointsInt", 3))
 {
 
     //load map vtk
@@ -320,8 +320,11 @@ void Detection::postFilter()
             cout<<"---------------------------------------"<<endl;
             cout<<"clusterNum: "<<clusterPointsNum.at(i)<<endl;
             cout<<"Ratio:  "<<(double)clusterPointsNum.at(i) / (double)outlierCount<<endl;
+            cout<<"ratioThreshold:  "<<(double)1 / (double)(clusterCount * filterPointsInt)<<endl;
         }
-        if((double)clusterPointsNum.at(i) / (double)outlierCount < filterPointsRatio)
+        if((double)clusterPointsNum.at(i) / (double)outlierCount
+                <
+                (double)1 / (double)(clusterCount * filterPointsInt) )
         {
             if(isCout)
                 cout<<"weed OUT:  "<<i<<endl;
