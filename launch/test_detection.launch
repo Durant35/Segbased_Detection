@@ -2,14 +2,15 @@
 
   <node pkg="test_detection" type="test_detection" name="test_detection" output="screen">
 
-    <param name="map_vtk" value="$(find test_detection)/data/map/1.vtk"/>
-    <param name="scan_vtk" value="$(find test_detection)/data/scan/3.vtk"/>
-    <param name="pose" value="$(find test_detection)/data/pose/3.txt"/>
+    <param name="map_vtk" value="$(find test_detection)/data/map/0.vtk"/>
+    <param name="scan_vtk" value="$(find test_detection)/data/scan/2.vtk"/>
+    <param name="pose" value="$(find test_detection)/data/pose/2.txt"/>
     <param name="isCout" value="false"/>
-    <param name="distanceThreshold" value="1.0"/>
+    <param name="distanceThreshold" value="1.3"/>
     <param name="rangeThreshold" value="15.0"/>
     <param name="growingThreshold" value="0.5"/>
     <param name="filterPointsInt" value="3.0"/>
+    <param name="isClusterIn2D" value="false"/>
 
   </node>
 

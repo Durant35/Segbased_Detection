@@ -33,9 +33,11 @@ public:
     void extract();
     void publish();
     void cluster();
+    void clusterIn2D();
     void postFilter();
     int findThePoint(Eigen::Vector3f input);
     float calculateDist(Eigen::Vector3f inputA, Eigen::Vector3f inputB);
+    bool isClusterIn2D;
 
 private:
 
@@ -83,7 +85,8 @@ Detection::Detection(ros::NodeHandle& n):
   rangeThreshold(getParam<double>("rangeThreshold", 20.0)),
   growingThreshold(getParam<double>("growingThreshold", 0.5)),
   isCout(getParam<bool>("isCout", false)),
-  filterPointsInt(getParam<int>("filterPointsInt", 3))
+  filterPointsInt(getParam<int>("filterPointsInt", 3)),
+  isClusterIn2D(getParam<bool>("isClusterIn2D", true))
 {
 
     //load map vtk
@@ -301,6 +304,11 @@ void Detection::cluster()
 
 }
 
+void Detection::clusterIn2D()
+{
+
+}
+
 float Detection::calculateDist(Eigen::Vector3f inputA, Eigen::Vector3f inputB)
 {
     return pow(inputA(0)-inputB(0),2) + pow(inputA(1)-inputB(1),2) + pow(inputA(2)-inputB(2),2);
@@ -386,16 +394,27 @@ int main(int argc, char **argv)
     ros::NodeHandle n;
     Detection detection(n);
 
+    double t1 = ros::Time::now().toSec();
+
     detection.extract();
-    detection.cluster();
+
+    double t2 = ros::Time::now().toSec();
+
+    if(detection.isClusterIn2D)
+        detection.clusterIn2D();
+    else
+        detection.cluster();
+
+    double t3 = ros::Time::now().toSec();
+
     detection.postFilter();
 
-//    ros::Rate r(10);
-//    while(ros::ok())
-//    {
-        detection.publish();
-//        r.sleep();
-//    }
+    double t4 = ros::Time::now().toSec();
+
+    detection.publish();
+
+    cout<<"Time:   "
+        <<t2-t1<<"---"<<t3-t2<<"---"<<t4-t3<<endl;
 
     ros::spin();
 
