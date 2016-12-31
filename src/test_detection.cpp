@@ -37,6 +37,7 @@ public:
     void postFilter();
     int findThePoint(Eigen::Vector3f input);
     float calculateDist(Eigen::Vector3f inputA, Eigen::Vector3f inputB);
+    float calculateDist2D(Eigen::Vector2f inputA, Eigen::Vector2f inputB);
     bool isClusterIn2D;
 
 private:
@@ -189,15 +190,14 @@ void Detection::cluster()
 {
     outlierScan.addDescriptor("cluster", PM::Matrix::Zero(1, outlierScan.features.cols()));
     const int rowLine = outlierScan.getDescriptorStartingRow("cluster");
-
     const int outlierCount(outlierScan.features.cols());
+
     if(isCout)
     {
         cout<<"scan Num: "<<scanPointCloud->features.cols()<<endl;
         cout<<"Map Num: "<<mapPointCloud->features.cols()<<endl;
         cout<<"outlier Num: "<<outlierCount<<endl;
     }
-
 
     //initial donePoints
     DP outlierScanTemp = outlierScan;
@@ -306,12 +306,113 @@ void Detection::cluster()
 
 void Detection::clusterIn2D()
 {
+    outlierScan.addDescriptor("cluster", PM::Matrix::Zero(1, outlierScan.features.cols()));
+    const int rowLine = outlierScan.getDescriptorStartingRow("cluster");
+
+    const int outlierCount(outlierScan.features.cols());
+
+    if(isCout)
+    {
+        cout<<"scan Num: "<<scanPointCloud->features.cols()<<endl;
+        cout<<"Map Num: "<<mapPointCloud->features.cols()<<endl;
+        cout<<"outlier Num: "<<outlierCount<<endl;
+    }
+
+    //initial donePoints
+    DP outlierScanTemp = outlierScan;
+    DP outlierScanTempTemp;
+    Eigen::Vector2f inputPointXY;
+    int thePointIndex = 0;
+    int clusterPointsCount = 1; //the num of points in one cluster
+
+    for(int i = 1; i < outlierCount + 1; i++)
+    {
+        if(isCout)
+            cout<<"iter:  "<<i;
+
+        //create the new DP-kd-tree form the remaining, delete the thePoint by Index, move it to thePointCloud
+        int remainPointCount(outlierScanTemp.features.cols());
+        outlierScanTempTemp = outlierScanTemp.createSimilarEmpty();
+        int count = 0;
+
+        for(int j = 0; j < remainPointCount; j++)
+        {
+            if(j != thePointIndex)
+            {
+                outlierScanTempTemp.setColFrom(count, outlierScanTemp, j);
+                count++;
+            }
+            else
+            {
+                inputPointXY = outlierScanTemp.features.col(j).head(2);
+
+                int indexInOutlierScan = findThePoint(outlierScanTemp.features.col(j).head(3));
+                if(indexInOutlierScan != -1)
+                {
+                    outlierScan.descriptors(rowLine, indexInOutlierScan) = clusterCount;
+                }
+
+            }
+        }
+        outlierScanTempTemp.conservativeResize(remainPointCount - 1);
+
+        outlierScanTemp = outlierScanTempTemp;
+
+        if(i == outlierCount)
+        {
+            clusterPointsNum.push_back(clusterPointsCount);
+            break;
+        }
+
+        if(isCout)
+            cout<<"  remain Points-kd:  "<<outlierScanTemp.features.cols();
+
+        float minDist2D = 9999.0;
+        //No NNS in kd-tree, find the point by 2D-Distance
+        for(int j = 0; j < remainPointCount - 1; j++)
+        {
+            Eigen::Vector2f thePointXY = outlierScanTemp.features.col(j).head(2);
+            float dist2D = calculateDist2D(inputPointXY, thePointXY);
+            if(dist2D < minDist2D)
+            {
+                thePointIndex = j;
+                minDist2D = dist2D;
+            }
+            else
+            {
+                continue;
+            }
+        }
+
+        if(minDist2D > growingThreshold)
+        {
+            clusterCount++;
+            clusterPointsNum.push_back(clusterPointsCount);
+            clusterPointsCount = 1;
+        }
+        else
+        {
+            clusterPointsCount ++;
+        }
+
+        if(isCout)
+            cout<<"  num in Cluster:  "<<clusterPointsCount<<endl;
+
+    }
+
+    if(isCout)
+        cout<<"   CLUSTERED:  "<<clusterCount<<endl;
 
 }
 
 float Detection::calculateDist(Eigen::Vector3f inputA, Eigen::Vector3f inputB)
 {
     return pow(inputA(0)-inputB(0),2) + pow(inputA(1)-inputB(1),2) + pow(inputA(2)-inputB(2),2);
+}
+
+float Detection::calculateDist2D(Eigen::Vector2f inputA, Eigen::Vector2f inputB)
+{
+    return pow(inputA(0)-inputB(0),2) + pow(inputA(1)-inputB(1),2);
 }
 
 void Detection::postFilter()
@@ -323,6 +424,7 @@ void Detection::postFilter()
 
     for(int i = 0; i <= clusterCount; i++)
     {
+
         if(isCout)
         {
             cout<<"---------------------------------------"<<endl;
@@ -330,6 +432,7 @@ void Detection::postFilter()
             cout<<"Ratio:  "<<(double)clusterPointsNum.at(i) / (double)outlierCount<<endl;
             cout<<"ratioThreshold:  "<<(double)1 / (double)(clusterCount * filterPointsInt)<<endl;
         }
+
         if((double)clusterPointsNum.at(i) / (double)outlierCount
                 <
                 (double)1 / (double)(clusterCount * filterPointsInt) )
@@ -394,27 +497,27 @@ int main(int argc, char **argv)
     ros::NodeHandle n;
     Detection detection(n);
 
-    double t1 = ros::Time::now().toSec();
+                                                double t1 = ros::Time::now().toSec();
 
     detection.extract();
 
-    double t2 = ros::Time::now().toSec();
+                                                double t2 = ros::Time::now().toSec();
 
     if(detection.isClusterIn2D)
         detection.clusterIn2D();
     else
         detection.cluster();
 
-    double t3 = ros::Time::now().toSec();
+                                                double t3 = ros::Time::now().toSec();
 
     detection.postFilter();
 
-    double t4 = ros::Time::now().toSec();
+                                                double t4 = ros::Time::now().toSec();
 
     detection.publish();
 
     cout<<"Time:   "
-        <<t2-t1<<"---"<<t3-t2<<"---"<<t4-t3<<endl;
+        <<t2-t1<<"---"<<t3-t2<<"---"<<t4-t3<<"   total:   "<<t4-t1<<endl;
 
     ros::spin();
 
