@@ -307,83 +307,59 @@ void Detection::cluster()
 void Detection::clusterIn2D()
 {
     outlierScan.addDescriptor("cluster", PM::Matrix::Zero(1, outlierScan.features.cols()));
-    const int rowLine = outlierScan.getDescriptorStartingRow("cluster");
+    outlierScan.addDescriptor("connected", PM::Matrix::Zero(1, outlierScan.features.cols()));
+
+    const int clusterRowLine = outlierScan.getDescriptorStartingRow("cluster");
+    const int connectRowLine = outlierScan.getDescriptorStartingRow("connected");
 
     const int outlierCount(outlierScan.features.cols());
 
-    if(isCout)
-    {
-        cout<<"scan Num: "<<scanPointCloud->features.cols()<<endl;
-        cout<<"Map Num: "<<mapPointCloud->features.cols()<<endl;
-        cout<<"outlier Num: "<<outlierCount<<endl;
-    }
+    cout<<"after extract:  "<<outlierCount<<endl;
 
     //initial donePoints
-    DP outlierScanTemp = outlierScan;
-    DP outlierScanTempTemp;
-    Eigen::Vector2f inputPointXY;
+    Eigen::Vector2f inputPointXY, thePointXY;
     int thePointIndex = 0;
     int clusterPointsCount = 1; //the num of points in one cluster
 
-    for(int i = 1; i < outlierCount + 1; i++)
+    clusterCount = 0;
+    int done = 1;
+
+    for(int i = 0; i < outlierCount; i++)
     {
-        if(isCout)
-            cout<<"iter:  "<<i;
 
-        //create the new DP-kd-tree form the remaining, delete the thePoint by Index, move it to thePointCloud
-        int remainPointCount(outlierScanTemp.features.cols());
-        outlierScanTempTemp = outlierScanTemp.createSimilarEmpty();
-        int count = 0;
+        outlierScan.descriptors(clusterRowLine, thePointIndex) = clusterCount;
+        outlierScan.descriptors(connectRowLine, thePointIndex) = done;
 
-        for(int j = 0; j < remainPointCount; j++)
-        {
-            if(j != thePointIndex)
-            {
-                outlierScanTempTemp.setColFrom(count, outlierScanTemp, j);
-                count++;
-            }
-            else
-            {
-                inputPointXY = outlierScanTemp.features.col(j).head(2);
-
-                int indexInOutlierScan = findThePoint(outlierScanTemp.features.col(j).head(3));
-                if(indexInOutlierScan != -1)
-                {
-                    outlierScan.descriptors(rowLine, indexInOutlierScan) = clusterCount;
-                }
-
-            }
-        }
-        outlierScanTempTemp.conservativeResize(remainPointCount - 1);
-
-        outlierScanTemp = outlierScanTempTemp;
-
-        if(i == outlierCount)
+        if(i == outlierCount - 1)
         {
             clusterPointsNum.push_back(clusterPointsCount);
             break;
         }
 
-        if(isCout)
-            cout<<"  remain Points-kd:  "<<outlierScanTemp.features.cols();
-
         float minDist2D = 9999.0;
-        //No NNS in kd-tree, find the point by 2D-Distance
-        for(int j = 0; j < remainPointCount - 1; j++)
+        thePointXY = outlierScan.features.col(thePointIndex).head(2);
+
+        for(int j = 0; j < outlierCount; j++)
         {
-            Eigen::Vector2f thePointXY = outlierScanTemp.features.col(j).head(2);
-            float dist2D = calculateDist2D(inputPointXY, thePointXY);
-            if(dist2D < minDist2D)
+            if(outlierScan.descriptors(connectRowLine, j) != done)
             {
-                thePointIndex = j;
-                minDist2D = dist2D;
-            }
-            else
-            {
-                continue;
+                inputPointXY = outlierScan.features.col(j).head(2);
+
+                float dist2D = calculateDist2D(inputPointXY, thePointXY);
+                if(dist2D < minDist2D)
+                {
+                    thePointIndex = j;
+                    minDist2D = dist2D;
+                }
+                else
+                {
+                    continue;
+                }
             }
         }
 
+
+        // Judge whether a new cluster is generated
         if(minDist2D > growingThreshold)
         {
             clusterCount++;
@@ -395,15 +371,11 @@ void Detection::clusterIn2D()
             clusterPointsCount ++;
         }
 
-        if(isCout)
-            cout<<"  num in Cluster:  "<<clusterPointsCount<<endl;
-
     }
 
-    if(isCout)
-        cout<<"   CLUSTERED:  "<<clusterCount<<endl;
-
+    cout<<"clustered:  "<<clusterCount<<endl;
 }
+
 
 float Detection::calculateDist(Eigen::Vector3f inputA, Eigen::Vector3f inputB)
 {
