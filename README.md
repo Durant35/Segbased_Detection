@@ -10,6 +10,10 @@ use the kdtree to remove the background, keep the dynamic ojects(people, cars, e
 
 Cluster on the objects.
 
+##PROBLEM
+
+There is problem in the clustering algorithm. Maybe EMST is really needed. 
+
 ##Thanks
 
 Thanks to Oxford Robotics Institue 
