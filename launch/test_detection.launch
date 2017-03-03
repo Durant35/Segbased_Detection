@@ -2,7 +2,7 @@
 
   <node pkg="test_detection" type="test_detection" name="test_detection" output="screen">
 
-    <param name="map_vtk" value="$(find test_detection)/data/map/1.vtk"/>
+    <param name="map_vtk" value="$(find test_detection)/data/map/2.vtk"/>
     <param name="scan_vtk" value="$(find test_detection)/data/scan/7.vtk"/>
     <param name="pose" value="$(find test_detection)/data/pose/7.txt"/>
     <param name="isCout" value="false"/>
@@ -11,6 +11,8 @@
     <param name="growingThreshold" value="0.5"/>
     <param name="filterPointsInt" value="3.0"/>
     <param name="isClusterIn2D" value="true"/>
+    <param name="varianceZThreshold" value="0.01"/>
+    <param name="filterMinNum" value="20.0"/>
 
   </node>
 

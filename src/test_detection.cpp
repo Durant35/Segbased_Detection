@@ -34,6 +34,7 @@ public:
     void publish();
     void cluster();
     void clusterIn2D();
+    void clusterByEMST();
     void postFilter();
     int findThePoint(Eigen::Vector3f input);
     float calculateDist(Eigen::Vector3f inputA, Eigen::Vector3f inputB);
@@ -65,7 +66,8 @@ private:
     const float distanceThreshold;
     const float rangeThreshold;
     const float growingThreshold;
-    const int filterPointsInt;
+    const float varianceZThreshold;
+    const int filterMinNum;
 
     int clusterCount = 0;  //label of cluster
     vector<int> clusterPointsNum;
@@ -86,8 +88,9 @@ Detection::Detection(ros::NodeHandle& n):
   rangeThreshold(getParam<double>("rangeThreshold", 20.0)),
   growingThreshold(getParam<double>("growingThreshold", 0.5)),
   isCout(getParam<bool>("isCout", false)),
-  filterPointsInt(getParam<int>("filterPointsInt", 3)),
-  isClusterIn2D(getParam<bool>("isClusterIn2D", true))
+  isClusterIn2D(getParam<bool>("isClusterIn2D", true)),
+  varianceZThreshold(getParam<float>("varianceZThreshold", 0.001)),
+  filterMinNum(getParam<int>("filterMinNum", 15))
 {
 
     //load map vtk
@@ -376,6 +379,101 @@ void Detection::clusterIn2D()
     cout<<"clustered:  "<<clusterCount<<endl;
 }
 
+void Detection::clusterByEMST()
+{
+    outlierScan.addDescriptor("cluster", PM::Matrix::Zero(1, outlierScan.features.cols()));
+
+    const int clusterRowLine = outlierScan.getDescriptorStartingRow("cluster");
+
+    const int outlierCount(outlierScan.features.cols());
+
+    cout<<"after extract:  "<<outlierCount<<endl;
+
+    //initial donePoints
+    Eigen::Vector2f inputPointXY, testPointXY;
+    int thePointIndex = 0;
+    int clusterPointsCount = 1; //the num of points in one cluster
+    vector<int> connectedIndex;
+
+    clusterCount = 0;
+    clusterPointsNum.clear();
+
+    for(int i = 0; i < outlierCount; i++)
+    {
+        float minDist2D = 999999.0;
+
+        if(i == 0)
+        {
+            //do what should do
+            connectedIndex.push_back(thePointIndex);
+            outlierScan.descriptors(clusterRowLine, thePointIndex) = clusterCount;
+            continue;
+        }
+        else
+        {
+            //normal
+            for(int j = 0; j < connectedIndex.size(); j++)
+            {
+                int testIndex = connectedIndex.at(j);
+                testPointXY = outlierScan.features.col(testIndex).head(2);
+                for(int k = 0; k < outlierCount; k++)
+                {
+                    vector<int>::iterator it = find(connectedIndex.begin(),
+                                                    connectedIndex.end(), k);
+                    //judge if a new point
+                    if(it != connectedIndex.end()) //in the connectedIndex vector
+                    {
+                        continue;
+                    }
+                    else //NOT
+                    {
+                        //calculate the distance
+                        inputPointXY = outlierScan.features.col(k).head(2);
+                        float dist2D = calculateDist2D(inputPointXY, testPointXY);
+
+                        if(dist2D < minDist2D)
+                        {
+                            thePointIndex = k;
+                            minDist2D = dist2D;
+                        }
+                        else
+                        {
+                            continue;
+                        }
+                    }
+                }
+            }
+        }
+
+        //do what should do
+        connectedIndex.push_back(thePointIndex);
+        outlierScan.descriptors(clusterRowLine, thePointIndex) = clusterCount;
+
+        //LAST POINT
+        if(i == outlierCount - 1)
+        {
+            clusterPointsNum.push_back(clusterPointsCount);
+            break;
+        }
+
+
+        // Judge whether a new cluster is generated
+        if(minDist2D > growingThreshold)
+        {
+            clusterCount++;
+            clusterPointsNum.push_back(clusterPointsCount);
+            clusterPointsCount = 1;
+        }
+        else
+        {
+            clusterPointsCount ++;
+        }
+
+    }
+
+    cout<<"clustered:  "<<clusterCount<<endl;
+    connectedIndex.clear();
+}
 
 float Detection::calculateDist(Eigen::Vector3f inputA, Eigen::Vector3f inputB)
 {
@@ -394,48 +492,82 @@ void Detection::postFilter()
 
     vector<int> weedOut;
 
-    for(int i = 0; i <= clusterCount; i++)
+    // Analysis cluster by cluster
+    // for Filter
+    ///TODO: post Filter is important, so keep finalScan as result not the outlierScan
+
+    if(outlierCount > 0)
     {
 
-        if(isCout)
+        for(int i = 0; i <= clusterCount; i++)
         {
-            cout<<"---------------------------------------"<<endl;
-            cout<<"clusterNum: "<<clusterPointsNum.at(i)<<endl;
-            cout<<"Ratio:  "<<(double)clusterPointsNum.at(i) / (double)outlierCount<<endl;
-            cout<<"ratioThreshold:  "<<(double)1 / (double)(clusterCount * filterPointsInt)<<endl;
+            //Get the cluster Points
+            PM::DataPoints clusterPointsTemp = outlierScan.createSimilarEmpty();
+            int count = 0;
+            for(int j = 0; j < outlierCount; j++)
+            {
+                if(outlierScan.descriptors(rowLine, j) == i)
+                {
+                    clusterPointsTemp.setColFrom(count, outlierScan, j);
+                    count++;
+                }
+            }
+            clusterPointsTemp.conservativeResize(count);
+            ///clusterPointsNum.at(i) == clusterPointsTemp.features.cols()
+
+            //Calculate the centroid
+            Eigen::Vector3f centroid;
+            for(int j = 0; j < clusterPointsNum.at(i); j++)
+            {
+                centroid += clusterPointsTemp.features.col(j).head(3);
+            }
+            centroid /= clusterPointsNum.at(i);
+//            cout<<"centroid:  "<<centroid<<endl;
+
+            //Calculate the variance of Z-axis
+            float varianceZ;
+            for(int j = 0; j < clusterPointsNum.at(i); j++)
+            {
+                varianceZ += pow(clusterPointsTemp.features(2, j) - centroid(2), 2);
+//                varianceZ = (centroid(2) * clusterPointsTemp.features(2, j) - centroid(2)) - (centroid(2) * clusterPointsTemp.features(2, j) - centroid(2));
+            }
+            varianceZ /= clusterPointsNum.at(i);
+
+//            cout<<"i: "<<i<<"  varianceZ:  "<<varianceZ<<"  pointNum:  "<<clusterPointsNum.at(i)<<endl;
+
+            //Judge if qualified the condition
+            if(clusterPointsNum.at(i) < filterMinNum
+               || varianceZ < varianceZThreshold)
+            {
+                weedOut.push_back(i);
+            }
+            else
+            {
+//                cout<<"i: "<<i<<"  varianceZ:  "<<varianceZ<<"  pointNum:  "<<clusterPointsNum.at(i)<<endl;
+            }
         }
 
-        if((double)clusterPointsNum.at(i) / (double)outlierCount
-                <
-                (double)1 / (double)(clusterCount * filterPointsInt) )
+        cout<<"Cluster weeded out:  "<<weedOut.size()<<endl;
+
+        finalScan = outlierScan.createSimilarEmpty();;
+        int count = 0;
+
+        for(int i = 0; i < outlierCount; i++)
         {
-            if(isCout)
-                cout<<"weed OUT:  "<<i<<endl;
-            weedOut.push_back(i);
+            vector<int>::iterator it= find(weedOut.begin(), weedOut.end(), outlierScan.descriptors(rowLine, i));
+            if(it != weedOut.end())
+            {
+                continue;
+            }
+            else
+            {
+                finalScan.setColFrom(count, outlierScan, i);
+                count++;
+            }
         }
+
+        finalScan.conservativeResize(count);
     }
-
-    finalScan = outlierScan.createSimilarEmpty();;
-    int count = 0;
-
-    for(int i = 0; i < outlierCount; i++)
-    {
-        vector<int>::iterator it= find(weedOut.begin(), weedOut.end(), outlierScan.descriptors(rowLine, i));
-        if(it != weedOut.end())
-        {
-            continue;
-        }
-        else
-        {
-            finalScan.setColFrom(count, outlierScan, i);
-            count++;
-        }
-    }
-
-    finalScan.conservativeResize(count);
-
-    if(isCout)
-        cout<<"After filter:  "<<finalScan.features.cols()<<endl;
 
 }
 
@@ -477,6 +609,7 @@ int main(int argc, char **argv)
 
     if(detection.isClusterIn2D)
         detection.clusterIn2D();
+//        detection.clusterByEMST();
     else
         detection.cluster();
 
