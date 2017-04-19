@@ -1,16 +1,16 @@
-##INPUT DATA
+## INPUT DATA
 
 use the localization result in the submap of Laser T&R
 
 and the submap, and a raw scan of VLP16
 
-##PROCESS
+## PROCESS
 
 use the kdtree to remove the background, keep the dynamic ojects(people, cars, etc) on.
 
 Cluster on the objects.
 
-##Results
+## Results
 
 laserScan on the subMap:
 
@@ -28,7 +28,7 @@ Process:
 
 ![](https://github.com/ZJUYH/test_detection/raw/master/image/4.png)
 
-##PROBLEM
+## PROBLEM
 
 There is problem in the clustering algorithm. 
 
@@ -36,7 +36,7 @@ Maybe the true EMST is really needed.
 
 Many of cluster methods are waiting for me! 
 
-##Thanks
+## Thanks
 
 Thanks to Oxford Robotics Institue 
 
