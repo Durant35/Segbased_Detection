@@ -14,19 +14,19 @@ Cluster on the objects.
 
 laserScan on the subMap:
 
-![](https://github.com/ZJUYH/test_detection/raw/master/image/1.png)
+![](./image/1.png)
 
 Use Knn to get the outliers:
 
-![](https://github.com/ZJUYH/test_detection/raw/master/image/2.png)
+![](./image/2.png)
 
 the cluster results:
 
-![](https://github.com/ZJUYH/test_detection/raw/master/image/0.png)
+![](./image/0.png)
 
 Process:
 
-![](https://github.com/ZJUYH/test_detection/raw/master/image/4.png)
+![](./image/4.png)
 
 ## PROBLEM
 
